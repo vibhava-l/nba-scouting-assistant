@@ -1,5 +1,5 @@
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment
 import re
 
 def extract_per_game_stats(soup):
@@ -33,6 +33,18 @@ def extract_per_game_stats(soup):
 def extract_advanced_stats(soup):
     # Extract the table from the HTML content
     table = soup.find('table', {'id': 'players_advanced'})
+    
+    # If table is not found, it may be inside an HTML comment
+    if table is None:
+        comments = soup.find_all(string=lambda text: isinstance(text, Comment))
+        for comment in comments:
+            if 'players_advanced' in comment:
+                # Parse the comment as HTML content
+                comment_soup = BeautifulSoup(comment, 'html.parser')
+                table = comment_soup.find('table', id='players_advanced')
+                if table:
+                    break
+    
     if table:
         print("Extracting college advanced stats...")
         # Extract headers from the table
@@ -150,7 +162,7 @@ def fetch_player_stats(url):
     }
 
 if __name__ == '__main__':
-    url = 'https://www.basketball-reference.com/international/players/michael-ruzic-1.html'
+    url = 'https://www.sports-reference.com/cbb/players/cooper-flagg-1.html'
     player_data = fetch_player_stats(url)
     if player_data:
         print("Player Metadata:", player_data['metadata'])
