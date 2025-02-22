@@ -2,12 +2,18 @@ import requests
 from bs4 import BeautifulSoup
 import re
 
-def extract_table(soup, table_id):
+def extract_per_game_stats(soup):
     # Extract the table from the HTML content
-    table = soup.find('table', {'id': table_id})
-    if not table:
-        print(f"Table with id '{table_id}' not found.")
-        return None
+    table = soup.find('table', {'id': 'players_per_game'})
+    if table:
+        print("Extracting college per game stats...")
+    else:
+        table = soup.find('table', {'id': 'player-stats-per_game-all-'})
+        if table:
+            print("Extracting international per game stats...")
+        else:
+            print("Per game stats table not found.")
+            return None
     
     # Extract headers from the table
     headers = [header.text.strip() for header in table.find('thead').find_all('th')]
@@ -23,6 +29,45 @@ def extract_table(soup, table_id):
         rows.append(row_data)
 
     return {'headers': headers, 'rows': rows}
+
+def extract_advanced_stats(soup):
+    # Extract the table from the HTML content
+    table = soup.find('table', {'id': 'players_advanced'})
+    if table:
+        print("Extracting college advanced stats...")
+        # Extract headers from the table
+        headers = [header.text.strip() for header in table.find('thead').find_all('th')]    
+        # Extract rows from the table
+        rows = []
+        for row in table.find('tbody').find_all('tr'):
+            # Ensure the row has data cells
+            cells = row.find_all('td')
+            if not cells:
+                continue
+            row_data = [cell.text.strip() for cell in cells]
+            rows.append(row_data)
+        return {'headers': headers, 'rows': rows}
+    else:
+        print("Advanced stats table not found (likely an international prospect).")
+        return None
+
+def clean_metadata(metadata):
+    # Clean up the name: remove " International Stats" suffix
+    if 'name' in metadata:
+        metadata['name'] = metadata['name'].replace(' International Stats', '')
+    
+    # Clean up the position: remove any digits, punctuation, or trailing words like 'Born'
+    if 'position' in metadata:
+        # This regex extracts only the alphabetical and space characters from the start.
+        match = re.match(r'^([A-Za-z\s]+)', metadata['position'])
+        if match:
+            metadata['position'] = match.group(1).strip()
+    
+    # Clean up the born data: replace non-breaking spaces with normal space
+    if 'born' in metadata:
+        metadata['born'] = metadata['born'].replace('\xa0', ' ')
+    
+    return metadata
 
 def extract_player_metadata(soup):
     metadata = {}
@@ -50,11 +95,11 @@ def extract_player_metadata(soup):
                     continue
             elif len(spans) == 1:
                 height_text = spans[0].get_text(strip=True)
-                p_text = p.get_text(strip=True)
-                metric_match = re.search(r'\d+\s*cm', p_text)
+                p_text = p.get_text(" ", strip=True)
+                metric_match = re.search(r'\((\d+\s*cm)\)', p_text)
                 if metric_match:
-                    metadata['height'] = metric_match.group(1)
-                    metadata['weight'] = height_text
+                    metadata['height'] = height_text
+                    metadata['height_metric'] = metric_match.group(1)
                     continue
             if 'Hometown' in text:
                 metadata['hometown'] = text.split(':')[1].strip()
@@ -68,11 +113,18 @@ def extract_player_metadata(soup):
                 metadata['born'] = text.split(':')[1].strip()
     else:
         print("Metadata div not found.")
-    return metadata
+    
+    # Clean the metadata before returning
+    return clean_metadata(metadata)
 
 def fetch_player_stats(url):
+    # Set the User-Agent in the headers to avoid 403 Forbidden error
+    headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Safari/537.36'
+    }
+
     # Send GET request to the URL
-    response = requests.get(url)
+    response = requests.get(url, headers=headers)
 
     # Check if request was successful
     if response.status_code != 200:
@@ -81,29 +133,29 @@ def fetch_player_stats(url):
     # Parse the HTML content using BeautifulSoup
     soup = BeautifulSoup(response.text, 'html.parser')
 
-    # Extract the player's name
-    player_name = soup.find('h1')
-    player_name = player_name.text.strip() if player_name else 'N/A'
-
     # Extract metadata (e.g. name, height, weight, etc.)
     metadata = extract_player_metadata(soup)
 
     # Extract the basic stats table (per game)
-    per_game_stats = extract_table(soup, 'per_game')  # TODO: Continue here ...
+    per_game_stats = extract_per_game_stats(soup)
+
+    # Extract the advanced stats table (only for college prospects)
+    advanced_stats = extract_advanced_stats(soup)
 
     # Return a dictionary with extracted data
     return {
-        'name': player_name,
-        'headers': headers,
-        'rows': rows
+        'metadata': metadata,
+        'per_game': per_game_stats,
+        'advanced': advanced_stats
     }
 
 if __name__ == '__main__':
-    url = 'https://www.sports-reference.com/cbb/players/cooper-flagg-1.html'
+    url = 'https://www.basketball-reference.com/international/players/michael-ruzic-1.html'
     player_data = fetch_player_stats(url)
     if player_data:
-        print("Player Name:", player_data['name'])
-        print("Stats Headers:", player_data['headers'])
-        print("First 3 Rows of Stats:")
-        for row in player_data['rows'][:3]:
-            print(row)
+        print("Player Metadata:", player_data['metadata'])
+        if player_data['per_game']:
+            print("Per Game Table Headers:", player_data['per_game']['headers'])
+            print("First Row of Per Game Stats:", player_data['per_game']['rows'][0] if player_data['per_game']['rows'] else "No rows found")
+        if player_data['advanced']:
+            print("Advanced Stats Table Headers:", player_data['advanced']['headers'])
